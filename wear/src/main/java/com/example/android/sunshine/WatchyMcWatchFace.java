@@ -131,8 +131,6 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
         Bitmap mBackgroundBitmap;
         Bitmap mBackgroundScaledBitmap;
 
-        LoadWeatherTask lwt;
-
         private GoogleApiClient googleApiClient;
 
         /**
@@ -325,8 +323,6 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
                     // TODO: Add code to handle the tap gesture.
                     Toast.makeText(getApplicationContext(), R.string.message, Toast.LENGTH_SHORT)
                             .show();
-                    lwt = new LoadWeatherTask();
-                    lwt.execute();
                     break;
             }
             invalidate();
@@ -453,41 +449,5 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
                 invalidate();
             }
         };
-    }
-
-    private class LoadWeatherTask extends AsyncTask<Void, Void, Integer> {
-
-        @Override
-        protected Integer doInBackground(Void... voids) {
-            /**
-             * Generate URI to pull current weather
-             * Make assignments using member level variables
-             * return a status code for onPostExecute()
-            * */
-
-            long begin = System.currentTimeMillis();
-            String pee = WeatherContract.WeatherEntry.buildWeatherUriWithDate(begin).toString();
-            if (Log.isLoggable("doInBackground", Log.VERBOSE)) {
-                Log.v("doInBackground", "URI: " + pee);
-            }
-
-            final Cursor cursor = getContentResolver().query(WeatherContract.WeatherEntry.buildWeatherUriWithDate(begin),
-                    null, null, null, null);
-            String dump = DatabaseUtils.dumpCursorToString(cursor);
-            if (Log.isLoggable("doInBackground", Log.VERBOSE)) {
-                Log.v("doInBackground", "Num meetings: " + dump);
-            }
-
-
-            return 0;
-        }
-
-        @Override
-        protected void onPostExecute(Integer result) {
-            /***
-             * Do some global assignments, invalidate()
-             */
-
-        }
     }
 }
