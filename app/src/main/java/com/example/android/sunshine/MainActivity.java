@@ -19,6 +19,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.support.v4.app.LoaderManager;
 import android.support.v4.content.CursorLoader;
 import android.support.v4.content.Loader;
@@ -31,10 +32,19 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 
 import com.example.android.sunshine.data.SunshinePreferences;
 import com.example.android.sunshine.data.WeatherContract;
 import com.example.android.sunshine.sync.SunshineSyncUtils;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.NodeApi;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
+import com.google.android.gms.wearable.Wearable;
 
 public class MainActivity extends AppCompatActivity implements
         LoaderManager.LoaderCallbacks<Cursor>,
@@ -78,6 +88,14 @@ public class MainActivity extends AppCompatActivity implements
     private int mPosition = RecyclerView.NO_POSITION;
 
     private ProgressBar mLoadingIndicator;
+
+    private NodeApi.NodeListener nodeListener;
+    private Handler handler;
+    private String remoteNodeId;
+
+    private GoogleApiClient apiClient;
+
+
 
 
     @Override
@@ -154,8 +172,73 @@ public class MainActivity extends AppCompatActivity implements
 
         SunshineSyncUtils.initialize(this);
 
+        /**
+         * Setup a node listener to make sure the watch is connected
+         */
 
+        handler = new Handler();
+        nodeListener = new NodeApi.NodeListener() {
+            @Override
+            public void onPeerConnected(Node node) {
+                Log.e("onPeerConnected", "MainActivity - App " + remoteNodeId);
+                remoteNodeId = node.getId();
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
 
+                        Toast.makeText(getApplication(), getString(R.string.peer_connected), Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+
+            @Override
+            public void onPeerDisconnected(Node node) {
+                remoteNodeId = node.getId();
+                Log.e("onPeerDisconnected", "MainActivity - App " + remoteNodeId);
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+
+                        Toast.makeText(getApplication(), getString(R.string.peer_disconnected), Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        };
+
+        // Create GoogleApiClient
+        apiClient = new GoogleApiClient.Builder(getApplicationContext()).addConnectionCallbacks(new GoogleApiClient.ConnectionCallbacks() {
+            @Override
+            public void onConnected(Bundle bundle) {
+                Log.e("apiClient", "onConnected()");
+                // Register Node and Message listeners
+                Wearable.NodeApi.addListener(apiClient, nodeListener);
+                // If there is a connected node, get it's id that is used when sending messages
+                Wearable.NodeApi.getConnectedNodes(apiClient).setResultCallback(new ResultCallback<NodeApi.GetConnectedNodesResult>() {
+                    @Override
+                    public void onResult(NodeApi.GetConnectedNodesResult getConnectedNodesResult) {
+                        Log.e("apiClient", "onResult()");
+                        if (getConnectedNodesResult.getStatus().isSuccess() && getConnectedNodesResult.getNodes().size() > 0) {
+                            remoteNodeId = getConnectedNodesResult.getNodes().get(0).getId();
+
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onConnectionSuspended(int i) {
+                Log.e("apiClient", "onConnectionSuspended()");
+            }
+        }).addOnConnectionFailedListener(new GoogleApiClient.OnConnectionFailedListener() {
+            @Override
+            public void onConnectionFailed(ConnectionResult connectionResult) {
+                Log.e("apiClient", "onConnectionFailed()");
+                if (connectionResult.getErrorCode() == ConnectionResult.API_UNAVAILABLE)
+                    Toast.makeText(getApplicationContext(), getString(R.string.wearable_api_unavailable), Toast.LENGTH_LONG).show();
+            }
+        }).addApi(Wearable.API).build();
+
+        apiClient.connect();
     }
 
     /**
@@ -242,6 +325,7 @@ public class MainActivity extends AppCompatActivity implements
         if (mPosition == RecyclerView.NO_POSITION) mPosition = 0;
         mRecyclerView.smoothScrollToPosition(mPosition);
         if (data.getCount() != 0) showWeatherDataView();
+        updateWear(data);
     }
 
     /**
@@ -344,5 +428,31 @@ public class MainActivity extends AppCompatActivity implements
         }
 
         return super.onOptionsItemSelected(item);
+    }
+
+    public void updateWear(Cursor cursor){
+        cursor.moveToFirst();
+        long max = cursor.getLong(MainActivity.INDEX_WEATHER_MAX_TEMP);
+        long min = cursor.getLong(MainActivity.INDEX_WEATHER_MIN_TEMP);
+        long con = cursor.getLong(MainActivity.INDEX_WEATHER_CONDITION_ID);
+        long date = cursor.getLong(MainActivity.INDEX_WEATHER_DATE);
+
+        Log.e("updateWear", "Cursor first position min/max: " + min + "/" + max);
+        Log.e("updateWear", "Cursor first position Condition/Date: " + con + "/" + date);
+
+        /**
+         * Build a data Item.
+         * Drop in key Value Pairs
+         *
+         * */
+        PutDataMapRequest putDataMapReq = PutDataMapRequest.create("/weather");
+        putDataMapReq.getDataMap().putLong("max", max);
+        putDataMapReq.getDataMap().putLong("min", min);
+        putDataMapReq.getDataMap().putLong("con", con);
+        putDataMapReq.getDataMap().putLong("date", date);
+
+        PutDataRequest putDataReq = putDataMapReq.asPutDataRequest();
+        Wearable.DataApi.putDataItem(apiClient, putDataReq);
+
     }
 }

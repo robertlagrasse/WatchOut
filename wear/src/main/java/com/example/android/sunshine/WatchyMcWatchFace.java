@@ -17,23 +17,48 @@
 package com.example.android.sunshine;
 
 import android.content.BroadcastReceiver;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.database.Cursor;
+import android.database.DatabaseUtils;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.wearable.provider.WearableCalendarContract;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
+import android.text.format.DateUtils;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 import android.widget.Toast;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.DataItemBuffer;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.Wearable;
 
 import java.lang.ref.WeakReference;
 import java.util.Calendar;
@@ -44,15 +69,21 @@ import java.util.concurrent.TimeUnit;
  * Digital watch face with seconds. In ambient mode, the seconds aren't displayed. On devices with
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
-public class WatchyMcWatchFace extends CanvasWatchFaceService {
+public class WatchyMcWatchFace extends CanvasWatchFaceService{
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
 
     /**
-     * Update rate in milliseconds for interactive mode. We update once a second since seconds are
-     * displayed in interactive mode.
+     *
+     *
+     *
+     * Change this to alter how often the watch updates the face
+     *
+     *
+     *
      */
-    private static final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.SECONDS.toMillis(1);
+
+    private static final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.MILLISECONDS.toMillis(500);
 
     /**
      * Handler message id for updating the time periodically in interactive mode.
@@ -63,6 +94,7 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
     public Engine onCreateEngine() {
         return new Engine();
     }
+
 
     private static class EngineHandler extends Handler {
         private final WeakReference<WatchyMcWatchFace.Engine> mWeakReference;
@@ -84,13 +116,31 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine {
+    private class Engine extends CanvasWatchFaceService.Engine implements
+            GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
         Paint mTextPaint;
         boolean mAmbient;
         Calendar mCalendar;
+
+        long mMinTemp, mMaxTemp, mCondition, mDate;
+
+        Bitmap mBackgroundBitmap;
+        Bitmap mBackgroundScaledBitmap;
+
+        LoadWeatherTask lwt;
+
+        private GoogleApiClient googleApiClient;
+
+        /**
+         *
+         * Make an adjustment if we change timezones.
+         *
+         */
+
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -98,6 +148,7 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
                 invalidate();
             }
         };
+
         float mXOffset;
         float mYOffset;
 
@@ -106,6 +157,17 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
          * disable anti-aliasing in ambient mode.
          */
         boolean mLowBitAmbient;
+
+        @Override
+        public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            if (mBackgroundScaledBitmap == null
+                    || mBackgroundScaledBitmap.getWidth() != width
+                    || mBackgroundScaledBitmap.getHeight() != height) {
+                mBackgroundScaledBitmap = Bitmap.createScaledBitmap(mBackgroundBitmap,
+                        width, height, true /* filter */);
+            }
+            super.onSurfaceChanged(holder, format, width, height);
+        }
 
         @Override
         public void onCreate(SurfaceHolder holder) {
@@ -117,7 +179,15 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
                     .setShowSystemUiTime(false)
                     .setAcceptsTapEvents(true)
                     .build());
+
             Resources resources = WatchyMcWatchFace.this.getResources();
+
+            googleApiClient = new GoogleApiClient.Builder(WatchyMcWatchFace.this)
+                    .addApi(Wearable.API)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .build();
+
             mYOffset = resources.getDimension(R.dimen.digital_y_offset);
 
             mBackgroundPaint = new Paint();
@@ -126,12 +196,17 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
             mTextPaint = new Paint();
             mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
 
+            Drawable backgroundDrawable = resources.getDrawable(R.drawable.boobs, null);
+            mBackgroundBitmap = ((BitmapDrawable) backgroundDrawable).getBitmap();
+
             mCalendar = Calendar.getInstance();
+
         }
 
         @Override
         public void onDestroy() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
+            releaseGoogleApiClient();
             super.onDestroy();
         }
 
@@ -148,12 +223,15 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
             super.onVisibilityChanged(visible);
 
             if (visible) {
+                googleApiClient.connect();
                 registerReceiver();
 
                 // Update time zone in case it changed while we weren't visible.
                 mCalendar.setTimeZone(TimeZone.getDefault());
                 invalidate();
             } else {
+
+                releaseGoogleApiClient();
                 unregisterReceiver();
             }
 
@@ -161,6 +239,13 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
             // whether we're in ambient mode), so we may need to start or stop the timer.
             updateTimer();
         }
+        private void releaseGoogleApiClient() {
+            if (googleApiClient != null && googleApiClient.isConnected()) {
+                Wearable.DataApi.removeListener(googleApiClient, onDataChangedListener);
+                googleApiClient.disconnect();
+            }
+        }
+
 
         private void registerReceiver() {
             if (mRegisteredTimeZoneReceiver) {
@@ -240,6 +325,8 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
                     // TODO: Add code to handle the tap gesture.
                     Toast.makeText(getApplicationContext(), R.string.message, Toast.LENGTH_SHORT)
                             .show();
+                    lwt = new LoadWeatherTask();
+                    lwt.execute();
                     break;
             }
             invalidate();
@@ -251,7 +338,7 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
             if (isInAmbientMode()) {
                 canvas.drawColor(Color.BLACK);
             } else {
-                canvas.drawRect(0, 0, bounds.width(), bounds.height(), mBackgroundPaint);
+                canvas.drawBitmap(mBackgroundScaledBitmap, 0, 0, null);
             }
 
             // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
@@ -296,6 +383,111 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService {
                         - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
+        }
+
+        @Override
+        public void onConnected(@Nullable Bundle bundle) {
+            Log.e("WatchFace","onConnected");
+            Wearable.DataApi.addListener(googleApiClient, onDataChangedListener);
+            Wearable.DataApi.getDataItems(googleApiClient).setResultCallback(onConnectedResultCallback);
+        }
+
+        @Override
+        public void onConnectionSuspended(int i) {
+            Log.e("WatchFace","onConnectionSuspended");
+
+        }
+
+        @Override
+        public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+            Log.e("WatchFace","onConnectionFailed");
+
+        }
+
+        private final DataApi.DataListener onDataChangedListener = new DataApi.DataListener() {
+            @Override
+            public void onDataChanged(DataEventBuffer dataEvents) {
+                for (DataEvent event : dataEvents) {
+                    if (event.getType() == DataEvent.TYPE_CHANGED) {
+                        DataItem item = event.getDataItem();
+                        processConfigurationFor(item);
+                    }
+                }
+
+                dataEvents.release();
+                invalidate();
+            }
+        };
+
+        private void processConfigurationFor(DataItem item) {
+            if ("/weather".equals(item.getUri().getPath())) {
+                DataMap dataMap = DataMapItem.fromDataItem(item).getDataMap();
+                if (dataMap.containsKey("max")) {
+                    mMaxTemp = dataMap.getLong("max");
+                        Log.e("processConfigurationFor", "max" + dataMap.getLong("max"));
+                }
+
+                if (dataMap.containsKey("min")) {
+                    mMinTemp = dataMap.getLong("min");
+                    Log.e("processConfigurationFor", "min" + dataMap.getLong("min"));
+                }
+                if (dataMap.containsKey("con")) {
+                    mCondition = dataMap.getLong("con");
+                    Log.e("processConfigurationFor", "con" + dataMap.getLong("con"));
+                }
+                if (dataMap.containsKey("date")) {
+                    mDate = dataMap.getLong("date");
+                    Log.e("processConfigurationFor", "date" + dataMap.getLong("date"));
+                }
+            }
+        }
+
+        private final ResultCallback<DataItemBuffer> onConnectedResultCallback = new ResultCallback<DataItemBuffer>() {
+            @Override
+            public void onResult(DataItemBuffer dataItems) {
+                for (DataItem item : dataItems) {
+                    processConfigurationFor(item);
+                }
+
+                dataItems.release();
+                invalidate();
+            }
+        };
+    }
+
+    private class LoadWeatherTask extends AsyncTask<Void, Void, Integer> {
+
+        @Override
+        protected Integer doInBackground(Void... voids) {
+            /**
+             * Generate URI to pull current weather
+             * Make assignments using member level variables
+             * return a status code for onPostExecute()
+            * */
+
+            long begin = System.currentTimeMillis();
+            String pee = WeatherContract.WeatherEntry.buildWeatherUriWithDate(begin).toString();
+            if (Log.isLoggable("doInBackground", Log.VERBOSE)) {
+                Log.v("doInBackground", "URI: " + pee);
+            }
+
+            final Cursor cursor = getContentResolver().query(WeatherContract.WeatherEntry.buildWeatherUriWithDate(begin),
+                    null, null, null, null);
+            String dump = DatabaseUtils.dumpCursorToString(cursor);
+            if (Log.isLoggable("doInBackground", Log.VERBOSE)) {
+                Log.v("doInBackground", "Num meetings: " + dump);
+            }
+
+
+            return 0;
+        }
+
+        @Override
+        protected void onPostExecute(Integer result) {
+            /***
+             * Do some global assignments, invalidate()
+             */
+
         }
     }
 }

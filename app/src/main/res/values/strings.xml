@@ -243,5 +243,8 @@
         High:<xliff:g id="high">%2$s</xliff:g>
         Low:<xliff:g id="low">%3$s</xliff:g>
     </string>
+    <string name="peer_connected">Watch Connected!</string>
+    <string name="peer_disconnected">Watch NOT Connected!</string>
+    <string name="wearable_api_unavailable">Wearable API Not Available</string>
 
 </resources>
