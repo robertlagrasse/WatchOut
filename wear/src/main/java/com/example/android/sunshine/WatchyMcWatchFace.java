@@ -17,36 +17,35 @@
 package com.example.android.sunshine;
 
 import android.content.BroadcastReceiver;
-import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
-import android.database.Cursor;
-import android.database.DatabaseUtils;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.support.wearable.provider.WearableCalendarContract;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
-import android.text.format.DateUtils;
-import android.util.Log;
+import android.view.Display;
+import android.view.LayoutInflater;
 import android.view.SurfaceHolder;
+import android.view.View;
 import android.view.WindowInsets;
-import android.widget.Toast;
+import android.view.WindowManager;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
@@ -61,9 +60,13 @@ import com.google.android.gms.wearable.DataMapItem;
 import com.google.android.gms.wearable.Wearable;
 
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+
+import static android.view.View.GONE;
+import static android.view.View.VISIBLE;
 
 /**
  * Digital watch face with seconds. In ambient mode, the seconds aren't displayed. On devices with
@@ -75,15 +78,11 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
 
     /**
      *
-     *
-     *
      * Change this to alter how often the watch updates the face
-     *
-     *
      *
      */
 
-    private static final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.MILLISECONDS.toMillis(500);
+    private static final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.MILLISECONDS.toMillis(1000);
 
     /**
      * Handler message id for updating the time periodically in interactive mode.
@@ -119,19 +118,30 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
     private class Engine extends CanvasWatchFaceService.Engine implements
             GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
+        Calendar mTime = Calendar.getInstance();
+
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
         Paint mTextPaint;
         boolean mAmbient;
         Calendar mCalendar;
+        String DEGREE  = "\u00b0";
 
-        long mMinTemp, mMaxTemp, mCondition, mDate;
+        long mMinTemp = 0, mMaxTemp = 0, mCondition = 0, mDate =0;
 
         Bitmap mBackgroundBitmap;
         Bitmap mBackgroundScaledBitmap;
 
         private GoogleApiClient googleApiClient;
+
+        private int specW, specH;
+        private View myLayout;
+        private TextView min, date, max, hour, minute;
+        private View midLine, buffer;
+        private LinearLayout bottom;
+        private final Point displaySize = new Point();
+        private ImageView weatherIcon;
 
         /**
          *
@@ -171,22 +181,57 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
 
+            /**
+             * Where am I? Where's my stuff? What day is it?
+             * */
+
+            Resources resources = WatchyMcWatchFace.this.getResources();
+            mCalendar = Calendar.getInstance();
+
+            /**
+             * The layout for my watch face is defined in XML. The file is called watch_this
+             * */
+
+            LayoutInflater inflater =
+                    (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+            myLayout = inflater.inflate(R.layout.watch_this, null);
+
+            Display display = ((WindowManager) getSystemService(Context.WINDOW_SERVICE))
+                    .getDefaultDisplay();
+            display.getSize(displaySize);
+
+            specW = View.MeasureSpec.makeMeasureSpec(displaySize.x,
+                    View.MeasureSpec.EXACTLY);
+            specH = View.MeasureSpec.makeMeasureSpec(displaySize.y,
+                    View.MeasureSpec.EXACTLY);
+
+            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
+
+            /**
+             * Get a reference to all of the UI elements we'll play with
+             * */
+
+            hour = (TextView) myLayout.findViewById(R.id.tvHour);
+            minute = (TextView) myLayout.findViewById(R.id.tvMinute);
+            date = (TextView) myLayout.findViewById(R.id.tvDate);
+            max = (TextView) myLayout.findViewById(R.id.tvMax);
+            min = (TextView) myLayout.findViewById(R.id.tvMin);
+            weatherIcon = (ImageView) myLayout.findViewById(R.id.ivWeather);
+
+            midLine = myLayout.findViewById(R.id.midLine);
+            bottom = (LinearLayout) myLayout.findViewById(R.id.bottomContainer);
+            buffer = myLayout.findViewById(R.id.buffer);
+
+            /**
+             * Arts and crafts
+             * */
+
             setWatchFaceStyle(new WatchFaceStyle.Builder(WatchyMcWatchFace.this)
                     .setCardPeekMode(WatchFaceStyle.PEEK_MODE_VARIABLE)
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
-                    .setAcceptsTapEvents(true)
+                    .setAcceptsTapEvents(false)
                     .build());
-
-            Resources resources = WatchyMcWatchFace.this.getResources();
-
-            googleApiClient = new GoogleApiClient.Builder(WatchyMcWatchFace.this)
-                    .addApi(Wearable.API)
-                    .addConnectionCallbacks(this)
-                    .addOnConnectionFailedListener(this)
-                    .build();
-
-            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
 
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(resources.getColor(R.color.background));
@@ -194,10 +239,19 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
             mTextPaint = new Paint();
             mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
 
-            Drawable backgroundDrawable = resources.getDrawable(R.drawable.boobs, null);
+            Drawable backgroundDrawable = resources.getDrawable(R.drawable.ic_clear, null);
             mBackgroundBitmap = ((BitmapDrawable) backgroundDrawable).getBitmap();
 
-            mCalendar = Calendar.getInstance();
+
+            /**
+             * Set the googleApiClient so we can receive data from the app on the mobile
+             * */
+
+            googleApiClient = new GoogleApiClient.Builder(WatchyMcWatchFace.this)
+                    .addApi(Wearable.API)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .build();
 
         }
 
@@ -305,10 +359,6 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
             updateTimer();
         }
 
-        /**
-         * Captures tap event (and tap type) and toggles the background color if the user finishes
-         * a tap.
-         */
         @Override
         public void onTapCommand(int tapType, int x, int y, long eventTime) {
             switch (tapType) {
@@ -320,9 +370,6 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
                     break;
                 case TAP_TYPE_TAP:
                     // The user has completed the tap gesture.
-                    // TODO: Add code to handle the tap gesture.
-                    Toast.makeText(getApplicationContext(), R.string.message, Toast.LENGTH_SHORT)
-                            .show();
                     break;
             }
             invalidate();
@@ -330,23 +377,36 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
 
         @Override
         public void onDraw(Canvas canvas, Rect bounds) {
-            // Draw the background.
+
+            hour.setText(new SimpleDateFormat("HH").format(mTime.getTime()));
+            minute.setText(new SimpleDateFormat("mm").format(mTime.getTime()));
+            date.setText(new SimpleDateFormat("E  d MMM y").format(mTime.getTime()));
+            min.setText(String.valueOf(mMinTemp) + DEGREE);
+            max.setText(String.valueOf(mMaxTemp) + DEGREE);
+
+            /**
+             * Turn off the views we don't want to see in ambient mode.
+             * I arranged the layout so the time would center when the
+             * remining views are GONE.
+             * */
+
             if (isInAmbientMode()) {
                 canvas.drawColor(Color.BLACK);
+                midLine.setVisibility(GONE);
+                bottom.setVisibility(GONE);
+                date.setVisibility(GONE);
+                buffer.setVisibility(GONE);
             } else {
-                canvas.drawBitmap(mBackgroundScaledBitmap, 0, 0, null);
+                canvas.drawColor(getResources().getColor(R.color.colorPrimary));
+                midLine.setVisibility(VISIBLE);
+                bottom.setVisibility(VISIBLE);
+                date.setVisibility(VISIBLE);
+                buffer.setVisibility(VISIBLE);
             }
 
-            // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
-            long now = System.currentTimeMillis();
-            mCalendar.setTimeInMillis(now);
-
-            String text = mAmbient
-                    ? String.format("%d:%02d", mCalendar.get(Calendar.HOUR),
-                    mCalendar.get(Calendar.MINUTE))
-                    : String.format("%d:%02d:%02d", mCalendar.get(Calendar.HOUR),
-                    mCalendar.get(Calendar.MINUTE), mCalendar.get(Calendar.SECOND));
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            myLayout.measure(specW, specH);
+            myLayout.layout(0, 0, myLayout.getMeasuredWidth(), myLayout.getMeasuredHeight());
+            myLayout.draw(canvas);
         }
 
         /**
@@ -383,21 +443,16 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
 
         @Override
         public void onConnected(@Nullable Bundle bundle) {
-            Log.e("WatchFace","onConnected");
             Wearable.DataApi.addListener(googleApiClient, onDataChangedListener);
             Wearable.DataApi.getDataItems(googleApiClient).setResultCallback(onConnectedResultCallback);
         }
 
         @Override
         public void onConnectionSuspended(int i) {
-            Log.e("WatchFace","onConnectionSuspended");
-
         }
 
         @Override
         public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-            Log.e("WatchFace","onConnectionFailed");
-
         }
 
         private final DataApi.DataListener onDataChangedListener = new DataApi.DataListener() {
@@ -420,20 +475,38 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
                 DataMap dataMap = DataMapItem.fromDataItem(item).getDataMap();
                 if (dataMap.containsKey("max")) {
                     mMaxTemp = dataMap.getLong("max");
-                        Log.e("processConfigurationFor", "max" + dataMap.getLong("max"));
                 }
-
                 if (dataMap.containsKey("min")) {
                     mMinTemp = dataMap.getLong("min");
-                    Log.e("processConfigurationFor", "min" + dataMap.getLong("min"));
                 }
                 if (dataMap.containsKey("con")) {
                     mCondition = dataMap.getLong("con");
-                    Log.e("processConfigurationFor", "con" + dataMap.getLong("con"));
+                    if (mCondition >= 200 && mCondition <= 232) {
+                        weatherIcon.setImageResource(R.drawable.ic_storm);
+                    } else if (mCondition >= 300 && mCondition <= 321) {
+                        weatherIcon.setImageResource(R.drawable.ic_light_rain);
+                    } else if (mCondition >= 500 && mCondition <= 504) {
+                        weatherIcon.setImageResource(R.drawable.ic_rain);
+                    } else if (mCondition == 511) {
+                        weatherIcon.setImageResource(R.drawable.ic_snow);
+                    } else if (mCondition >= 520 && mCondition <= 531) {
+                        weatherIcon.setImageResource(R.drawable.ic_rain);
+                    } else if (mCondition >= 600 && mCondition <= 622) {
+                        weatherIcon.setImageResource(R.drawable.ic_snow);
+                    } else if (mCondition >= 701 && mCondition <= 761) {
+                        weatherIcon.setImageResource(R.drawable.ic_fog);
+                    } else if (mCondition == 761 || mCondition == 781) {
+                        weatherIcon.setImageResource(R.drawable.ic_storm);
+                    } else if (mCondition == 800) {
+                        weatherIcon.setImageResource(R.drawable.ic_clear);
+                    } else if (mCondition == 801) {
+                        weatherIcon.setImageResource(R.drawable.ic_light_clouds);
+                    } else if (mCondition >= 802 && mCondition <= 804) {
+                        weatherIcon.setImageResource(R.drawable.ic_cloudy);
+                    }
                 }
                 if (dataMap.containsKey("date")) {
                     mDate = dataMap.getLong("date");
-                    Log.e("processConfigurationFor", "date" + dataMap.getLong("date"));
                 }
             }
         }
@@ -444,7 +517,6 @@ public class WatchyMcWatchFace extends CanvasWatchFaceService{
                 for (DataItem item : dataItems) {
                     processConfigurationFor(item);
                 }
-
                 dataItems.release();
                 invalidate();
             }

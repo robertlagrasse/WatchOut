@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:visibility="visible">
+
+    <LinearLayout
+        android:id="@+id/topContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:orientation="vertical"
+        android:layout_weight="1">
+
+        <View
+            android:id="@+id/buffer"
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:layout_weight="2">
+
+        </View>
+        <LinearLayout
+            android:id="@+id/timeContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="3"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/tvHour"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:gravity="center|right"
+                android:layout_weight="2"
+                android:textAppearance="@style/TextAppearance.WearDiag.Title"
+                android:text="12"
+                android:textSize="36sp" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text=":"
+                android:textAppearance="@style/TextAppearance.WearDiag.Title"
+                android:textSize="36sp"/>
+            <TextView
+                android:id="@+id/tvMinute"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:gravity="center|left"
+                android:layout_weight="2"
+                android:text="34"
+                android:textAppearance="@style/TextAppearance.WearDiag.Title"
+                android:textSize="36sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvDate"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="2"
+            android:text="FRI, 22 FEB 1974"
+            android:gravity="center"
+            android:textAppearance="@style/TextAppearance.Wearable.Medium"
+             />
+    </LinearLayout>
+
+    <View
+        android:id="@+id/midLine"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:minHeight="1dp"
+        android:layout_margin="4dp"
+        android:background="@android:color/darker_gray"
+         />
+
+    <LinearLayout
+        android:id="@+id/bottomContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:orientation="horizontal"
+        android:layout_weight="1"
+        >
+
+        <ImageView
+            android:id="@+id/ivWeather"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="3"
+            android:gravity="right"
+            android:src="@drawable/ic_clear"/>
+
+        <TextView
+            android:id="@+id/tvMax"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="3"
+            android:gravity="center|top"
+            android:text="69"
+            android:textAppearance="@style/TextAppearance.WearDiag.Title"
+            android:textSize="24sp" />
+
+        <TextView
+            android:id="@+id/tvMin"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="3"
+            android:gravity="center|top"
+            android:text="77"
+            android:textAppearance="@style/TextAppearance.WearDiag.Title"
+            android:textSize="24sp" />
+    </LinearLayout>
+
+</LinearLayout>
